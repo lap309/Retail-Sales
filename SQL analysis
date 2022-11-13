@@ -1,0 +1,168 @@
+select* from info
+limit 5;
+
+select * from finance
+limit 5;
+
+select * from traffic
+limit 5;
+
+select * from reviews
+limit 5;
+
+select * from brands
+limit 5;
+
+## Checking to see missing values/null values in each column
+-- Count all columns as total_rows
+-- Count the number of non-missing entries for description, listing_price, and last_visited
+select count(*) as total_rows, 
+    count(info.description) as count_description, 
+    count(finance.listing_price) as count_listing_price, 
+    count(traffic.last_visited) as count_last_visited
+from info
+inner join finance on info.product_id = finance.product_id
+inner join traffic on info.product_id = traffic.product_id;
+
+## FOrmat it in percentages
+select total_rows, 100*count_description/total_rows as description_pcnt, 100*count_listing_price/total_rows as listing_pcnt, 100*count_last_visited/total_rows as last_visited_pcnt
+select total_rows, 100*count_description/total_rows as description_pcnt, 100*count_listing_price/total_rows as listing_pcnt, 100*count_last_visited/total_rows as last_visited_pcnt
+from (select count(*) as total_rows, 
+     count(info.description) as count_description, 
+   count(finance.listing_price) as count_listing_price, 
+    count(traffic.last_visited) as count_last_visited
+from info
+inner join finance on info.product_id = finance.product_id
+inner join traffic on info.product_id = traffic.product_id) as temp;
+
+2. Nike vs Adidas pricing
+We can see the database contains 3,179 products in total. Of the columns we previewed, only one — last_visited — is missing more than five percent of its values. Now let's turn our attention to pricing.
+How do the price points of Nike and Adidas products differ? Answering this question can help us build a picture of the company's stock range and customer market. We will run a query to produce a distribution of the listing_price and the count for each price, grouped by brand.
+-- Select the brand, listing_price as an integer, and a count of all products in finance 
+-- Join brands to finance on product_id
+-- Filter for products with a listing_price more than zero
+-- Aggregate results by brand and listing_price, and sort the results by listing_price in descending order
+SELECT b.brand, f.listing_price::integer, COUNT(f.*)
+FROM finance AS f
+INNER JOIN brands AS b 
+    ON f.product_id = b.product_id
+WHERE listing_price > 0
+GROUP BY b.brand, f.listing_price
+ORDER BY listing_price DESC;
+
+3. Labeling price ranges
+It turns out there are 77 unique prices for the products in our database, which makes the output of our last query quite difficult to analyze.
+Let's build on our previous query by assigning labels to different price ranges, grouping by brand and label. We will also include the total revenue for each price range and brand.
+-- Select the brand, a count of all products in the finance table, and total revenue
+-- Create four labels for products based on their price range, aliasing as price_category
+-- Join brands to finance on product_id and filter out products missing a value for brand
+-- Group results by brand and price_category, sort by total_revenue
+
+select brands.brand, count(f.*), sum(f.revenue) as total_revenue,
+CASE WHEN f.listing_price>=129 THEN 'Elite'
+    WHEN f.listing_price>=74 THEN 'Expensive'
+    WHEN f.listing_price>=42 THEN 'Average'
+    ELSE 'Budget'
+    END as price_category
+from finance as f
+inner join brands on brands.product_id = f.product_id
+where brands.brand is not NULL
+group by brands.brand, price_category
+order by total_revenue desc;
+
+4. Average discount by brand
+Interestingly, grouping products by brand and price range allows us to see that Adidas items generate more total revenue regardless of price category! Specifically, "Elite" Adidas products priced $129 or more typically generate the highest revenue, so the company can potentially increase revenue by shifting their stock to have a larger proportion of these products!
+
+Note we have been looking at listing_price so far. The listing_price may not be the price that the product is ultimately sold for. To understand revenue better, let's take a look at the discount, which is the percent reduction in the listing_price when the product is actually sold. We would like to know whether there is a difference in the amount of discount offered between brands, as this could be influencing revenue.
+
+-- Select brand and average_discount as a percentage
+-- Join brands to finance on product_id
+-- Aggregate by brand
+-- Filter for products without missing values for brand
+select b.brand, avg(f.discount)*100 as average_discount
+from finance as f
+inner join brands as b on b.product_id = f.product_id
+where b.brand is not NULL
+group by b.brand;
+
+5. Correlation between revenue and reviews
+Strangely, no discount is offered on Nike products! In comparison, not only do Adidas products generate the most revenue, but these products are also heavily discounted!
+To improve revenue further, the company could try to reduce the amount of discount offered on Adidas products, and monitor sales volume to see if it remains stable. Alternatively, it could try offering a small discount on Nike products. This would reduce average revenue for these products, but may increase revenue overall if there is an increase in the volume of Nike products sold.
+Now explore whether relationships exist between the columns in our database. We will check the strength and direction of a correlation between revenue and reviews.
+--Calculate the correlation between reviews and revenue as review_revenue_corr
+select corr(r.reviews, f.revenue) as review_revenue_corr
+from finance as f
+inner join reviews as r on f.product_id = r.product_id;
+
+6. Ratings and reviews by product description length¶
+Interestingly, there is a strong positive correlation between revenue and reviews. This means, potentially, if we can get more reviews on the company's website, it may increase sales of those items with a larger number of reviews.
+Perhaps the length of a product's description might influence a product's rating and reviews — if so, the company can produce content guidelines for listing products on their website and test if this influences revenue. Let's check this out!
+
+-- Calculate description_length, Convert rating to a numeric data type and calculate average_rating
+-- Join info to reviews on product_id and group the results by description_length
+-- Filter for products without missing values for description, and sort results by description_length
+select trunc(length(i.description),-2) as description_length, round(avg(r.rating::numeric),2) as average_rating
+from reviews as r
+inner join info as i on r.product_id = i.product_id
+where description is not null
+group by description_length
+order by description_length;
+
+7. Reviews by month and brand¶
+Unfortunately, there doesn't appear to be a clear pattern between the length of a product's description and its rating.
+As we know a correlation exists between reviews and revenue, one approach the company could take is to run experiments with different sales processes encouraging more reviews from customers about their purchases, such as by offering a small discount on future purchases.
+Let's take a look at the volume of reviews by month to see if there are any trends or gaps we can look to exploit.
+
+-- Select brand, month from last_visited, and a count of all products in reviews aliased as num_reviews
+-- Join traffic with reviews and brands on product_id
+-- Group by brand and month, filtering out missing values for brand and month
+-- Order the results by brand and month
+
+select b.brand, extract('month' from t.last_visited) as month, count(r.*) as num_reviews
+from brands as b
+inner join reviews as r on b.product_id = r.product_id
+inner join traffic as t on b.product_id = t.product_id
+where b.brand is not null and extract('month' from t.last_visited) is not null
+group by brand, month
+order by brand, month;
+
+8. Footwear product performance
+Looks like product reviews are highest in the first quarter of the calendar year, so there is scope to run experiments aiming to increase the volume of reviews in the other nine months!
+So far, we have been primarily analyzing Adidas vs Nike products. Now, let's switch our attention to the type of products being sold. As there are no labels for product type, we will create a Common Table Expression (CTE) that filters description for keywords, then use the results to find out how much of the company's stock consists of footwear products and the median revenue generated by these items.
+-- Create the footwear CTE, containing description and revenue
+-- Filter footwear for products with a description containing %shoe%, %trainer, or %foot%
+-- Also filter for products that are not missing values for description
+-- Calculate the number of products and median revenue for footwear products
+
+with footwear as(
+    select i.description, f.revenue
+from info as i
+inner join finance as f on i.product_id = f.product_id
+where (i.description ilike '%shoe%' or i.description ilike '%trainer%' or i.description ilike '%foot%')
+    and i.description is not null
+)
+select count(*) as num_footwear_products, 
+percentile_disc(0.5) WITHIN GROUP (ORDER BY revenue) as median_footwear_revenue
+from footwear;
+
+9. Clothing product performance
+Recall from the first task that we found there are 3,117 products without missing values for description. Of those, 2,700 are footwear products, which accounts for around 85% of the company's stock. They also generate a median revenue of over $3000 dollars!
+
+This is interesting, but we have no point of reference for whether footwear's median_revenue is good or bad compared to other products. So, for our final task, let's examine how this differs to clothing products. We will re-use footwear, adding a filter afterward to count the number of products and median_revenue of products that are not in footwear.
+
+-- Copy the footwear CTE from the previous task
+-- Calculate the number of products in info and median revenue from finance
+-- Inner join info with finance on product_id
+-- Filter the selection for products with a description not in footwear
+with footwear as(
+    select i.description as description, f.revenue as revenue
+from info as i
+inner join finance as f on i.product_id = f.product_id
+where (i.description ilike '%shoe%' or i.description ilike '%trainer%' or i.description ilike '%foot%')
+    and i.description is not null
+group by i.description, f.revenue
+)
+select count(i.description) as num_clothing_products,  percentile_disc(0.5) WITHIN GROUP (ORDER BY f.revenue) as median_clothing_revenue
+from info as i
+inner join finance as f on i.product_id = f.product_id
+where i.description not in (select description from footwear);
